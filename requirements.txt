@@ -1,6 +1,2 @@
 streamlit
-googleNo Langchain, No FAISS, No PyPDF.**
-
-```text
-streamlit
 google-generativeai
