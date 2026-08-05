@@ -1,95 +1,103 @@
 import streamlit as st
 import google.generativeai as genai
+from pypdf import PdfReader
 
 # Setup Configuration
 st.set_page_config(page_title="Socrates: Pedagogical Knowledge Orchestrator", layout="wide")
 
-# --- EASY API KEY BOX ---
-st.sidebar.title("🔑 Security Setup")
-# This creates a box on the left side of your website to paste the key
-user_api_key = st.sidebar.text_input("Paste your Gemini API Key here:", type="password")
+# Ensure API Key is handled safely
+try:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+except Exception:
+    st.error("API Key not found. Please add GOOGLE_API_KEY to Streamlit Secrets.")
 
-if user_api_key:
-    genai.configure(api_key=user_api_key)
-    st.sidebar.success("API Key Linked!")
-else:
-    st.sidebar.warning("Please paste your API Key to start.")
+# --- HELPER: PDF READER ---
+def get_pdf_text(file):
+    reader = PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        content = page.extract_text()
+        if content: text += content
+    return text[:30000] # Limit for stability
 
-# --- PAGE HEADER ---
-st.title("🏛️ Socrates: Agentic Pedagogical Knowledge Orchestrator")
-st.markdown("### *A Deterministic Framework for Multi-Modal Academic Synthesis*")
-
-# Tabs for Modular Research Workflow
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Tutor (Persona-Adaptive Synthesis)", 
+# --- SIDEBAR NAVIGATION ---
+st.sidebar.title("🏛️ Socrates Workbench")
+module = st.sidebar.radio("Navigate Modules", [
+    "Tutor (Persona-Adaptive)", 
     "Research Gap Identifier", 
     "Literature Review Finder", 
     "Pedagogical Roadmap",
-    "NPTEL Asynchronous Pedagogical Transcoding Engine"
+    "NPTEL Transcoding Engine",
+    "Philosophy and Epistemology",
+    "Discovery Pathway",
+    "CogniBridge (Vernacular: Banglish)"
 ])
 
-with tab1:
+# --- MAIN CONTENT AREA ---
+st.title("Socrates: Agentic Pedagogical Knowledge Orchestrator")
+
+if module == "Tutor (Persona-Adaptive)":
     st.header("Tutor: High-Context PDF Synthesis")
     uploaded_file = st.file_uploader("Ingest Technical PDF", type="pdf")
     tone = st.selectbox("Select Syntactic Persona", [
-        "Senior Professional Researcher", "Ivy League PhD Student", 
-        "GATE Coach Tone", "UGC-NET Coach Tone", "Simple Indian English", "Munna Bhai Lingo"
+        "Senior Researcher", "Ivy League PhD Student", "Munna Bhai Lingo",
+        "MIT STEM Professor Insights", "UGCNET Coach", "Indian University Professor", "ENOUGH-TO-PASS-SEMESTER"
     ])
+    query = st.text_input("What should Socrates explain from this PDF?", "Summarize the key exam points.")
     
-    if uploaded_file and st.button("Synthesize Knowledge"):
-        with st.spinner("Executing agentic analysis..."):
-            st.text_area("Synthesized Analysis", f"Parsed for deep semantic threads. Output conditioned to: {tone}")
+    if uploaded_file and st.button("Synthesize"):
+        with st.spinner(f"Synthesizing as {tone}..."):
+            context = get_pdf_text(uploaded_file)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = f"Act as a {tone}. Based on this text: {context}, answer: {query}"
+            response = model.generate_content(prompt)
+            st.markdown(response.text)
 
-with tab2:
+elif module == "Research Gap Identifier":
     st.header("Research Gap Identifier")
-    domain = st.selectbox("Select Domain", ["EEE", "AI/ML", "CSE", "ECE", "Mechanical", "Physics MSc", "Math MSc"])
-    exam = st.selectbox("Target Assessment", ["GATE", "IIT-JAM", "CUET", "UGC-NET"])
-    user_query = st.text_area("Specific topic or chapter to analyze:")
-    
-    if st.button("Analyze Requirement Gap"):
-        if not user_api_key:
-            st.error("Please enter your API Key in the sidebar first!")
-        else:
-            with st.spinner("Mapping curriculum to examination standards..."):
-                model = genai.GenerativeModel("gemini-2.0-flash")
-                prompt = f"Analyze the gap between the {domain} syllabus and {exam} requirements for the topic: {user_query}. Provide a structured gap analysis and study strategy."
-                response = model.generate_content(prompt)
-                st.markdown("### Gap Analysis & Strategic Recommendations")
-                st.write(response.text)
+    domain = st.selectbox("Select Domain", ["EEE", "AI/ML", "CSE", "Physics MSc"])
+    user_query = st.text_area("Specific topic to analyze:")
+    if st.button("Analyze Gap"):
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(f"Analyze research gaps for {domain}: {user_query}. Suggest 3 PhD directions.")
+        st.write(response.text)
 
-with tab3:
-    st.header("Literature Review Finder")
-    search_query = st.text_input("Query ArXiv.org for Research Synthesis:")
-    if st.button("Query Research Nexus"):
-        st.write(f"Orchestrating search across ArXiv repositories for: {search_query}")
-        st.text_area("Research Synthesis & Gap Analysis", "Foundational papers retrieved. Analysis of research gaps in progress...")
-
-with tab4:
+elif module == "Pedagogical Roadmap":
     st.header("Pedagogical Roadmap: Ontological Mapping")
-    domain_map = st.selectbox("Select Domain for Roadmap", ["BTech EEE", "BTech AI ML", "BTech CSE", "BTech ECE", "BTech Mechanical", "Physics MSc", "Math MSc"])
-    if st.button("Generate Deterministic Roadmap"):
-        st.write(f"Mapping curriculum for {domain_map}...")
-        st.success("Roadmap visualized: Core competency mapping complete.")
+    kg_data = {
+        "Mathematics as Foundation": "Linear Algebra → underpins → Deep Learning; Calculus → drives → Optimization.",
+        "Engineering to AI/ML": "Control Theory → Reinforcement Learning; Signal Processing → Computer Vision."
+    }
+    selected_kg = st.selectbox("Select Knowledge Graph", list(kg_data.keys()))
+    st.info(kg_data[selected_kg])
 
-with tab5:
-    st.header("NPTEL Asynchronous Pedagogical Transcoding Engine")
-    st.markdown("*A high-fidelity framework for the semantic distillation of asynchronous lecture transcripts.*")
-    
-    transcript_input = st.text_area("Ingest Lecture Transcript Vector:", height=200, placeholder="Paste the raw YouTube/NPTEL transcript here...")
-    
+elif module == "NPTEL Transcoding Engine":
+    st.header("NPTEL Asynchronous Transcoding")
+    transcript = st.text_area("Paste NPTEL Transcript:", height=200)
     if st.button("Transcode & Distill"):
-        if not user_api_key:
-            st.error("Please enter your API Key in the sidebar first!")
-        else:
-            with st.spinner("Executing semantic decomposition..."):
-                model = genai.GenerativeModel("gemini-2.0-flash")
-                prompt = f"""
-                Act as an elite Ivy League Academic Fellow. Perform a pedagogical distillation 
-                of the following lecture transcript. Deconstruct the primary conceptual threads, 
-                resolve technical ambiguity, and reconstruct the output into a 
-                concise, highly structured pedagogical summary: {transcript_input}
-                """
-                response = model.generate_content(prompt)
-                
-                st.markdown("### Distilled Conceptual Output")
-                st.write(response.text)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(f"Simplify this NPTEL lecture into 5 exam points: {transcript}")
+        st.write(response.text)
+
+elif module == "Philosophy and Epistemology":
+    st.header("Philosophy and Epistemology")
+    with st.expander("Philosophy of Disciplinary Fields"):
+        st.write("**Philosophy of CS:** Algorithms as mathematical vs physical objects.")
+    with st.expander("Ancient Indian Philosophy"):
+        st.write("**Nyāya-Vaiśeṣika:** Formal 5-step syllogism for AI inference.")
+    with st.expander("Greek Traditions"):
+        st.write("**Socratic Method:** Dialectical inquiry for logic debugging.")
+
+elif module == "CogniBridge (Vernacular: Banglish)":
+    st.header("CogniBridge (Banglish Mode)")
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf", key="bang")
+    concept = st.text_input("Concept to explain in Banglish:")
+    if uploaded_file and st.button("Distill"):
+        context = get_pdf_text(uploaded_file)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        prompt = f"Explain '{concept}' in Banglish (Bengali+English mix) using local analogies. Context: {context}"
+        response = model.generate_content(prompt)
+        st.write(response.text)
+
+st.sidebar.markdown("---")
+st.sidebar.caption("Socrates v3.0 | Research & Exam Prep")
