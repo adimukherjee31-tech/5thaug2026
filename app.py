@@ -1,116 +1,85 @@
 import streamlit as st
-import os
-
-# --- CRITICAL: VERSION CHECK & ERROR CATCHING ---
-try:
-    import google.generativeai as genai
-    import tempfile
-    import time
-except Exception as e:
-    st.error(f"System boot error: {e}")
-    st.stop()
+import google.generativeai as genai
+from pypdf import PdfReader
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="Socrates AI", layout="wide")
+st.set_page_config(page_title="Socrates Workbench", layout="wide")
 
-# --- API KEY (SAFE LOADING) ---
-# We check secrets safely to avoid the "Oh no" crash
-if "GOOGLE_API_KEY" in st.secrets:
-    api_key = st.secrets["GOOGLE_API_KEY"]
-else:
-    api_key = st.sidebar.text_input("🔑 Enter Gemini API Key", type="password")
+# --- API KEY ---
+api_key = st.secrets.get("GOOGLE_API_KEY") or st.sidebar.text_input("🔑 Gemini API Key", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
 else:
-    st.warning("Please enter your Gemini API Key in the sidebar to begin.")
+    st.warning("Enter API Key in Sidebar to start.")
 
 # --- NAVIGATION ---
 st.sidebar.title("🏛️ Socrates Workbench")
-module = st.sidebar.radio("Navigate Modules", [
+module = st.sidebar.radio("Navigate", [
     "Tutor (Persona-Adaptive)", 
     "Research Gap Identifier", 
     "Pedagogical Roadmap",
-    "Philosophy and Epistemology",
-    "Discovery Pathway",
+    "Philosophy & STEM",
     "CogniBridge (Banglish)"
 ])
 
-st.title("Socrates: Pedagogical Knowledge Orchestrator")
+st.title("Socrates: Agentic Pedagogical Orchestrator")
 
-# --- CORE FUNCTION: GEMINI PDF ENGINE ---
-def process_pdf(uploaded_file, prompt_text):
-    if not api_key:
-        st.error("Missing API Key!")
-        return
-    
-    with st.spinner("Socrates is analyzing the document..."):
-        try:
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(uploaded_file.getbuffer())
-                tmp_path = tmp.name
-            
-            # Upload using Gemini File API (No Langchain/FAISS needed)
-            pdf_file = genai.upload_file(path=tmp_path, display_name="manual")
-            
-            # Wait for the file to be ready
-            while pdf_file.state.name == "PROCESSING":
-                time.sleep(2)
-                pdf_file = genai.get_file(pdf_file.name)
-            
-            # Generate response
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content([pdf_file, prompt_text])
-            
-            # Cleanup
-            genai.delete_file(pdf_file.name)
-            os.remove(tmp_path)
-            return response.text
-            
-        except Exception as err:
-            return f"AI Error: {err}"
+# --- HELPER: SIMPLE PDF READER ---
+def get_pdf_text(file):
+    reader = PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        content = page.extract_text()
+        if content:
+            text += content
+    return text
 
 # --- MODULES ---
 if module == "Tutor (Persona-Adaptive)":
     st.header("Tutor: PDF Synthesis")
-    uploaded_file = st.file_uploader("Upload PDF (DBMS / UGC NET)", type="pdf")
-    tone = st.selectbox("Persona", ["Senior Researcher", "Munna Bhai", "UGCNET Coach", "Pass-Semester"])
-    user_q = st.text_input("What should Socrates explain?", "Summarize the key points.")
-    
-    if uploaded_file and st.button("Synthesize"):
-        ans = process_pdf(uploaded_file, f"Act as a {tone}. Explain: {user_q}")
-        st.markdown(ans)
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+    tone = st.selectbox("Select Persona", ["Senior Researcher", "Munna Bhai", "UGCNET Coach", "Professor"])
+    query = st.text_input("What should Socrates explain?", "Summarize the key concepts.")
 
-elif module == "CogniBridge (Banglish)":
-    st.header("CogniBridge (Vernacular)")
-    uploaded_file = st.file_uploader("Upload Technical PDF", type="pdf", key="bang")
-    concept = st.text_input("Concept to explain in Banglish", "Relational Algebra")
-    
-    if uploaded_file and st.button("Distill"):
-        ans = process_pdf(uploaded_file, f"Explain {concept} in Banglish (Bengali-English mix). Use funny local analogies.")
-        st.markdown(ans)
+    if uploaded_file and st.button("Synthesize") and api_key:
+        with st.spinner("Socrates is reading..."):
+            text = get_pdf_text(uploaded_file)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            # We send only the first 30,000 characters to ensure it doesn't crash
+            prompt = f"Act as a {tone}. Based on this text: {text[:30000]}, answer this: {query}"
+            response = model.generate_content(prompt)
+            st.markdown(response.text)
 
 elif module == "Research Gap Identifier":
     st.header("Research Gap Identifier")
-    topic = st.text_input("Domain/Topic")
-    if st.button("Identify Gaps") and api_key:
+    topic = st.text_input("Research Topic / Domain")
+    if st.button("Analyze") and api_key:
         model = genai.GenerativeModel("gemini-1.5-flash")
-        res = model.generate_content(f"Suggest 3 research gaps for {topic}")
+        res = model.generate_content(f"Suggest 3 novel research gaps for {topic} suitable for a PhD proposal.")
         st.write(res.text)
 
-# Static Content for other modules
+elif module == "CogniBridge (Banglish)":
+    st.header("CogniBridge (Banglish Mode)")
+    uploaded_file = st.file_uploader("Upload PDF", type="pdf", key="bang")
+    concept = st.text_input("Concept to explain", "Relational Algebra")
+
+    if uploaded_file and st.button("Explain") and api_key:
+        with st.spinner("Processing..."):
+            text = get_pdf_text(uploaded_file)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            prompt = f"Explain the concept '{concept}' in Banglish (Bengali+English mix) using this context: {text[:20000]}"
+            response = model.generate_content(prompt)
+            st.write(response.text)
+
 elif module == "Pedagogical Roadmap":
-    st.header("Roadmap")
-    st.write("Math → AI/ML → Engineering Interdependencies")
+    st.header("Pedagogical Roadmap")
+    st.info("Mathematics → AI/ML → Engineering Interdependencies")
+    st.write("1. Linear Algebra (Foundation)\n2. Optimization (Mechanics)\n3. Neural Networks (Application)")
 
-elif module == "Philosophy and Epistemology":
-    st.header("Philosophy of STEM")
-    st.write("Exploring the Socratic Method and Ancient logic in AI.")
-
-elif module == "Discovery Pathway":
-    st.header("Discovery Pathway")
-    st.write("Inquiry-based learning paths.")
+elif module == "Philosophy & STEM":
+    st.header("Philosophy and Epistemology")
+    st.write("**Nyāya-Vaiśeṣika:** Logic for AI.\n**Socratic Method:** Debugging logic.")
 
 st.sidebar.markdown("---")
-st.sidebar.caption("Stable Build: v2.1")
+st.sidebar.caption("Socrates Stable Build v3.0")
