@@ -1,108 +1,128 @@
 import streamlit as st
-import os
-import tempfile
+import google.generativeai as genai
+from pypdf import PdfReader
+import io
 
-# --- CRASH PREVENTION ---
-try:
-    import google.generativeai as genai
-    from langchain_google_genai import ChatGoogleGenerativeAI
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-    from langchain_community.vectorstores import FAISS
-    from langchain_community.document_loaders import PyPDFLoader
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain_core.prompts import ChatPromptTemplate
-    from langchain_core.output_parsers import StrOutputParser
-except Exception as e:
-    st.error("Library Load Error. Please check your requirements.txt")
-    st.code(e)
-    st.stop()
+# Setup Configuration
+st.set_page_config(page_title="Socrates: Pedagogical Knowledge Orchestrator", layout="wide")
 
-# --- APP SETUP ---
-st.set_page_config(page_title="DBMS AI Tutor", layout="wide")
-st.title("🎓 JNTUH DBMS AI Tutor")
-st.caption("UGC NET & Exam Prep Mode Active")
+# --- API KEY HANDLING ---
+# Priority: 1. Streamlit Secrets, 2. Manual Sidebar Input
+api_key = st.sidebar.text_input("Gemini API Key", type="password")
+if not api_key:
+    if "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
 
-with st.sidebar:
-    st.header("1. Setup")
-    api_key = st.text_input("Enter Gemini API Key", type="password")
-    uploaded_file = st.file_uploader("Upload DBMS PDF", type="pdf")
-    
-    st.header("2. Persona")
-    tone = st.selectbox("Style", ["Professor", "Munnabhai (Hinglish)", "Simple"])
-    
-    if st.button("Clear Cache"):
-        st.cache_resource.clear()
-        st.success("Cache Cleared")
-
-# --- MODEL FINDER ---
-def get_working_model(api_key):
-    try:
-        genai.configure(api_key=api_key)
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if '1.5-flash' in m.name: return 'gemini-1.5-flash'
-                if 'pro' in m.name: return 'gemini-pro'
-        return "gemini-1.5-flash"
-    except:
-        return "gemini-1.5-flash"
-
-# --- CORE LOGIC ---
-if api_key and uploaded_file:
-    try:
-        # Detect Model
-        active_model = get_working_model(api_key)
-        llm = ChatGoogleGenerativeAI(model=active_model, google_api_key=api_key)
-        
-        @st.cache_resource(show_spinner=False)
-        def process_pdf(file):
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(file.read())
-                tmp_path = tmp.name
-            
-            # Using PyPDFLoader - more stable for Streamlit
-            loader = PyPDFLoader(tmp_path)
-            pages = loader.load()
-            
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-            chunks = splitter.split_documents(pages[:200]) # Limit to 200 pages for speed
-            
-            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-            vector_db = FAISS.from_documents(chunks, embeddings)
-            return vector_db
-
-        with st.spinner("Processing Textbook..."):
-            db = process_pdf(uploaded_file)
-        
-        st.success(f"Tutor Ready! (Using {active_model})")
-
-        # Chat
-        query = st.chat_input("Ask a DBMS question...")
-        if query:
-            with st.chat_message("user"):
-                st.write(query)
-            
-            docs = db.similarity_search(query, k=3)
-            context = "\n\n".join([d.page_content for d in docs])
-            
-            styles = {
-                "Professor": "Professional JNTUH Professor. Bullet points.",
-                "Munnabhai (Hinglish)": "Munnabhai style. Hinglish, call them Mammu.",
-                "Simple": "Explain like a child."
-            }
-
-            prompt = ChatPromptTemplate.from_template("""
-            Context: {context}
-            Persona: {style}
-            Question: {question}
-            Answer:""")
-            
-            chain = prompt | llm | StrOutputParser()
-            
-            with st.chat_message("assistant"):
-                response = chain.invoke({"context": context, "style": styles[tone], "question": query})
-                st.markdown(response)
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+if api_key:
+    genai.configure(api_key=api_key)
 else:
-    st.info("👋 Enter your API Key and upload your PDF to begin.")
+    st.warning("Please enter your Gemini API Key in the sidebar to enable AI features.")
+
+# --- HELPER FUNCTION: PDF TEXT EXTRACTION ---
+def get_pdf_text(uploaded_file):
+    reader = PdfReader(uploaded_file)
+    text = ""
+    # Limit to first 100 pages to avoid memory crashes on free servers
+    for page in reader.pages[:100]:
+        text += page.extract_text() + "\n"
+    return text
+
+# --- SIDEBAR NAVIGATION ---
+st.sidebar.title("🏛️ Socrates Workbench")
+module = st.sidebar.radio("Navigate Modules", [
+    "Tutor (Persona-Adaptive)", 
+    "Research Gap Identifier", 
+    "Literature Review Finder", 
+    "Pedagogical Roadmap",
+    "NPTEL Transcoding Engine",
+    "Philosophy and Epistemology",
+    "Discovery Pathway",
+    "CogniBridge (Vernacular: Banglish)"
+])
+
+# --- MAIN CONTENT AREA ---
+st.title("Socrates: Agentic Pedagogical Knowledge Orchestrator")
+
+if module == "Tutor (Persona-Adaptive)":
+    st.header("Tutor: High-Context PDF Synthesis")
+    uploaded_file = st.file_uploader("Ingest Technical PDF", type="pdf")
+    user_question = st.text_input("Ask a specific question about this PDF:")
+    tone = st.selectbox("Select Syntactic Persona", [
+        "Senior Researcher", "Ivy League PhD Student", "Munna Bhai Lingo",
+        "GATE Coaching Instructor", "UGCNET Coach", "MIT STEM PROFESSOR INSIGHTS", 
+        "INDIAN UNIVERSITY PROFESSOR DIALECT", "ENOUGH-TO-PASS-SEMESTER"
+    ])
+    
+    if uploaded_file and st.button("Synthesize"):
+        with st.spinner(f"Socrates is channeling {tone}..."):
+            try:
+                # 1. Extract text simply
+                raw_text = get_pdf_text(uploaded_file)
+                # 2. Call Gemini
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                prompt = f"""
+                You are acting as: {tone}.
+                Below is the content of a technical document. 
+                Question: {user_question if user_question else 'Summarize the core ontological concepts of this text.'}
+                
+                Document Content:
+                {raw_text[:30000]} # Sending first 30k chars to keep it fast
+                """
+                response = model.generate_content(prompt)
+                st.markdown("### Synthesized Insight")
+                st.write(response.text)
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+elif module == "Research Gap Identifier":
+    st.header("Research Gap Identifier")
+    domain = st.selectbox("Select Domain", ["EEE", "AI/ML", "CSE", "Physics MSc"])
+    user_query = st.text_area("Specific topic to analyze:")
+    if st.button("Analyze Gap"):
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(f"Analyze research gaps for {domain}: {user_query}. Provide 3 specific novel ideas.")
+        st.write(response.text)
+
+elif module == "NPTEL Transcoding Engine":
+    st.header("NPTEL Asynchronous Pedagogical Transcoding Engine")
+    transcript = st.text_area("Paste NPTEL/Lecture Transcript:", height=200)
+    if st.button("Transcode & Distill"):
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(f"Perform pedagogical distillation on this lecture transcript. Break it down into Core Principles and Exam-oriented notes: {transcript}")
+        st.write(response.text)
+
+elif module == "Philosophy and Epistemology":
+    st.header("Philosophy and Epistemology")
+    st.info("Explore the structural foundations of knowledge.")
+    with st.expander("Philosophy of Disciplinary Fields"):
+        st.write("**Philosophy of CS:** Ontological status of algorithms.")
+        st.write("**Philosophy of EEE:** Teleology of control systems.")
+    # (Keep your other expanders here as they are static and work fine)
+
+elif module == "CogniBridge (Vernacular: Banglish)":
+    st.header("CogniBridge (Vernacular: Banglish)")
+    st.markdown("<sub>*Translates your dense, dry textbook to simple banglish*</sub>", unsafe_allow_html=True)
+    
+    uploaded_file = st.file_uploader("Upload core academic PDF for ingestion", type="pdf", key="banglish_upload")
+    concept_input = st.text_area("Concept to explain in Banglish (e.g. Relational Algebra):")
+    
+    if uploaded_file and st.button("Distill to Banglish"):
+        with st.spinner("Translating to Banglish..."):
+            try:
+                raw_text = get_pdf_text(uploaded_file)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                prompt = f"""
+                Explain the following concept in 'Banglish' (Bengali mixed with English). 
+                Keep the tone extremely helpful like a friendly senior student helping a junior.
+                Concept/Context from book: {raw_text[:20000]}
+                Target Topic: {concept_input}
+                """
+                response = model.generate_content(prompt)
+                st.markdown("### Banglish Synthesis")
+                st.write(response.text)
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+# (Default Discovery Pathway and Literature Review sections stay as your placeholders)
+else:
+    st.info("Module under orchestration. Please select a functional module from the sidebar.")
