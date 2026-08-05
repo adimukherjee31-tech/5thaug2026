@@ -1,38 +1,57 @@
 import streamlit as st
 import os
 import tempfile
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
-# --- PAGE CONFIG ---
+# --- CRASH PREVENTION ---
+try:
+    import google.generativeai as genai
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_community.vectorstores import FAISS
+    from langchain_community.document_loaders import PyPDFLoader
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_core.output_parsers import StrOutputParser
+except Exception as e:
+    st.error("Library Load Error. Please check your requirements.txt")
+    st.code(e)
+    st.stop()
+
+# --- APP SETUP ---
 st.set_page_config(page_title="DBMS AI Tutor", layout="wide")
 st.title("🎓 JNTUH DBMS AI Tutor")
-st.caption("Lightweight Version: Fast & Stable for Exam Prep")
+st.caption("UGC NET & Exam Prep Mode Active")
 
-# --- SIDEBAR ---
 with st.sidebar:
     st.header("1. Setup")
     api_key = st.text_input("Enter Gemini API Key", type="password")
-    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+    uploaded_file = st.file_uploader("Upload DBMS PDF", type="pdf")
     
-    st.header("2. Study Mode")
-    tone = st.selectbox("Teaching Style", ["Professor", "Munnabhai (Hinglish)", "Simple"])
+    st.header("2. Persona")
+    tone = st.selectbox("Style", ["Professor", "Munnabhai (Hinglish)", "Simple"])
+    
+    if st.button("Clear Cache"):
+        st.cache_resource.clear()
+        st.success("Cache Cleared")
+
+# --- MODEL FINDER ---
+def get_working_model(api_key):
+    try:
+        genai.configure(api_key=api_key)
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                if '1.5-flash' in m.name: return 'gemini-1.5-flash'
+                if 'pro' in m.name: return 'gemini-pro'
+        return "gemini-1.5-flash"
+    except:
+        return "gemini-1.5-flash"
 
 # --- CORE LOGIC ---
 if api_key and uploaded_file:
     try:
-        # Initialize Gemini components using the same API Key
-        os.environ["GOOGLE_API_KEY"] = api_key
-        
-        # Lightweight Embeddings from Google
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        
-        # Stable Chat Model
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+        # Detect Model
+        active_model = get_working_model(api_key)
+        llm = ChatGoogleGenerativeAI(model=active_model, google_api_key=api_key)
         
         @st.cache_resource(show_spinner=False)
         def process_pdf(file):
@@ -40,57 +59,50 @@ if api_key and uploaded_file:
                 tmp.write(file.read())
                 tmp_path = tmp.name
             
+            # Using PyPDFLoader - more stable for Streamlit
             loader = PyPDFLoader(tmp_path)
             pages = loader.load()
             
-            # Splitting text
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-            chunks = splitter.split_documents(pages[:200]) # Read first 200 pages
+            chunks = splitter.split_documents(pages[:200]) # Limit to 200 pages for speed
             
-            # Creating Knowledge Base
+            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             vector_db = FAISS.from_documents(chunks, embeddings)
             return vector_db
 
-        with st.spinner("Analyzing Textbook..."):
+        with st.spinner("Processing Textbook..."):
             db = process_pdf(uploaded_file)
         
-        st.success("Ready! Ask me anything.")
+        st.success(f"Tutor Ready! (Using {active_model})")
 
-        # --- CHAT ---
-        query = st.chat_input("Ask a question (e.g. explain ACID properties)")
+        # Chat
+        query = st.chat_input("Ask a DBMS question...")
         if query:
             with st.chat_message("user"):
                 st.write(query)
             
-            # Retrieval
             docs = db.similarity_search(query, k=3)
             context = "\n\n".join([d.page_content for d in docs])
             
             styles = {
-                "Professor": "Professional JNTUH Professor. Use bullet points.",
-                "Munnabhai (Hinglish)": "Munnabhai style. Use Hinglish, call the student Mammu.",
-                "Simple": "Explain like a 10-year-old."
+                "Professor": "Professional JNTUH Professor. Bullet points.",
+                "Munnabhai (Hinglish)": "Munnabhai style. Hinglish, call them Mammu.",
+                "Simple": "Explain like a child."
             }
 
             prompt = ChatPromptTemplate.from_template("""
             Context: {context}
-            Style: {style}
+            Persona: {style}
             Question: {question}
-            
             Answer:""")
             
             chain = prompt | llm | StrOutputParser()
             
             with st.chat_message("assistant"):
-                response = chain.invoke({
-                    "context": context, 
-                    "style": styles[tone], 
-                    "question": query
-                })
+                response = chain.invoke({"context": context, "style": styles[tone], "question": query})
                 st.markdown(response)
 
     except Exception as e:
-        st.error(f"System Error: {e}")
-        st.info("Check if your API Key is valid and has Gemini access.")
+        st.error(f"Error: {e}")
 else:
-    st.info("👋 Enter your API Key and upload your PDF to start.")
+    st.info("👋 Enter your API Key and upload your PDF to begin.")
