@@ -1,31 +1,51 @@
 import streamlit as st
 import google.generativeai as genai
-from pypdf import PdfReader
-import io
+import tempfile
+import os
+import time
 
-# Setup Configuration
-st.set_page_config(page_title="Socrates: Pedagogical Knowledge Orchestrator", layout="wide")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Socrates: Pedagogical Orchestrator", layout="wide")
 
-# --- API KEY HANDLING ---
-# Priority: 1. Streamlit Secrets, 2. Manual Sidebar Input
-api_key = st.sidebar.text_input("Gemini API Key", type="password")
-if not api_key:
-    if "GOOGLE_API_KEY" in st.secrets:
-        api_key = st.secrets["GOOGLE_API_KEY"]
+# --- API KEY SETUP ---
+# It will look for 'GOOGLE_API_KEY' in your Streamlit Secrets first.
+# If not found, you can enter it in the sidebar.
+api_key = st.secrets.get("GOOGLE_API_KEY") or st.sidebar.text_input("🔑 Gemini API Key", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
 else:
-    st.warning("Please enter your Gemini API Key in the sidebar to enable AI features.")
+    st.info("👋 Please enter your Gemini API Key in the sidebar or add it to Secrets to start.")
 
-# --- HELPER FUNCTION: PDF TEXT EXTRACTION ---
-def get_pdf_text(uploaded_file):
-    reader = PdfReader(uploaded_file)
-    text = ""
-    # Limit to first 100 pages to avoid memory crashes on free servers
-    for page in reader.pages[:100]:
-        text += page.extract_text() + "\n"
-    return text
+# --- HELPER FUNCTION: GEMINI PDF ENGINE ---
+def process_pdf_with_gemini(uploaded_file, user_prompt):
+    """Uploads file to Gemini, generates response, and cleans up."""
+    with st.spinner("Socrates is reading the document..."):
+        # 1. Save uploaded file to a temporary location
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded_file.getbuffer())
+            tmp_path = tmp.name
+        
+        try:
+            # 2. Upload to Google Cloud (Native Gemini Support)
+            pdf_file = genai.upload_file(path=tmp_path, display_name="textbook")
+            
+            # 3. Wait for Google to process the file
+            while pdf_file.state.name == "PROCESSING":
+                time.sleep(2)
+                pdf_file = genai.get_file(pdf_file.name)
+            
+            # 4. Generate Content
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content([pdf_file, user_prompt])
+            
+            # 5. Cleanup
+            genai.delete_file(pdf_file.name)
+            os.remove(tmp_path)
+            
+            return response.text
+        except Exception as e:
+            return f"Error: {e}"
 
 # --- SIDEBAR NAVIGATION ---
 st.sidebar.title("🏛️ Socrates Workbench")
@@ -40,39 +60,24 @@ module = st.sidebar.radio("Navigate Modules", [
     "CogniBridge (Vernacular: Banglish)"
 ])
 
-# --- MAIN CONTENT AREA ---
+# --- MAIN CONTENT ---
 st.title("Socrates: Agentic Pedagogical Knowledge Orchestrator")
+st.markdown("---")
 
 if module == "Tutor (Persona-Adaptive)":
     st.header("Tutor: High-Context PDF Synthesis")
     uploaded_file = st.file_uploader("Ingest Technical PDF", type="pdf")
-    user_question = st.text_input("Ask a specific question about this PDF:")
     tone = st.selectbox("Select Syntactic Persona", [
         "Senior Researcher", "Ivy League PhD Student", "Munna Bhai Lingo",
-        "GATE Coaching Instructor", "UGCNET Coach", "MIT STEM PROFESSOR INSIGHTS", 
-        "INDIAN UNIVERSITY PROFESSOR DIALECT", "ENOUGH-TO-PASS-SEMESTER"
+        "GATE Coaching Instructor", "UGCNET Coach", "Indian University Professor", "ENOUGH-TO-PASS-SEMESTER"
     ])
+    question = st.text_input("Ask Socrates a question about this PDF:", "Summarize the core arguments of this text.")
     
     if uploaded_file and st.button("Synthesize"):
-        with st.spinner(f"Socrates is channeling {tone}..."):
-            try:
-                # 1. Extract text simply
-                raw_text = get_pdf_text(uploaded_file)
-                # 2. Call Gemini
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                prompt = f"""
-                You are acting as: {tone}.
-                Below is the content of a technical document. 
-                Question: {user_question if user_question else 'Summarize the core ontological concepts of this text.'}
-                
-                Document Content:
-                {raw_text[:30000]} # Sending first 30k chars to keep it fast
-                """
-                response = model.generate_content(prompt)
-                st.markdown("### Synthesized Insight")
-                st.write(response.text)
-            except Exception as e:
-                st.error(f"Error: {e}")
+        prompt = f"Act as a {tone}. Based on the provided document, answer this: {question}"
+        result = process_pdf_with_gemini(uploaded_file, prompt)
+        st.markdown("### 🎓 Knowledge Synthesis")
+        st.write(result)
 
 elif module == "Research Gap Identifier":
     st.header("Research Gap Identifier")
@@ -80,49 +85,37 @@ elif module == "Research Gap Identifier":
     user_query = st.text_area("Specific topic to analyze:")
     if st.button("Analyze Gap"):
         model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(f"Analyze research gaps for {domain}: {user_query}. Provide 3 specific novel ideas.")
+        response = model.generate_content(f"Analyze research gaps for {domain}: {user_query}. Provide 3 specific research directions.")
         st.write(response.text)
 
-elif module == "NPTEL Transcoding Engine":
-    st.header("NPTEL Asynchronous Pedagogical Transcoding Engine")
-    transcript = st.text_area("Paste NPTEL/Lecture Transcript:", height=200)
-    if st.button("Transcode & Distill"):
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(f"Perform pedagogical distillation on this lecture transcript. Break it down into Core Principles and Exam-oriented notes: {transcript}")
-        st.write(response.text)
+elif module == "Pedagogical Roadmap":
+    st.header("Pedagogical Roadmap: Ontological Mapping")
+    kg_data = {
+        "Mathematics as Foundation": "Linear Algebra → underpins → Deep Learning; Calculus → drives → Optimization.",
+        "Engineering Convergence": "Control Theory → Reinforcement Learning; Signal Processing → Computer Vision."
+    }
+    selected_kg = st.selectbox("Select Knowledge Graph", list(kg_data.keys()))
+    st.info(kg_data[selected_kg])
 
 elif module == "Philosophy and Epistemology":
     st.header("Philosophy and Epistemology")
-    st.info("Explore the structural foundations of knowledge.")
-    with st.expander("Philosophy of Disciplinary Fields"):
+    with st.expander("Philosophy of STEM"):
         st.write("**Philosophy of CS:** Ontological status of algorithms.")
-        st.write("**Philosophy of EEE:** Teleology of control systems.")
-    # (Keep your other expanders here as they are static and work fine)
+        st.write("**Philosophy of AI:** Syntactic processing vs. semantic understanding.")
+    with st.expander("Ancient Indian Philosophy"):
+        st.write("**Nyāya-Vaiśeṣika:** Uses 5-step syllogism for formal AI inference.")
 
 elif module == "CogniBridge (Vernacular: Banglish)":
     st.header("CogniBridge (Vernacular: Banglish)")
-    st.markdown("<sub>*Translates your dense, dry textbook to simple banglish*</sub>", unsafe_allow_html=True)
-    
-    uploaded_file = st.file_uploader("Upload core academic PDF for ingestion", type="pdf", key="banglish_upload")
-    concept_input = st.text_area("Concept to explain in Banglish (e.g. Relational Algebra):")
+    uploaded_file = st.file_uploader("Upload Technical PDF for Banglish Translation", type="pdf")
+    concept = st.text_input("Concept to explain (e.g. Normalization)", "Explain the main topic of the book")
     
     if uploaded_file and st.button("Distill to Banglish"):
-        with st.spinner("Translating to Banglish..."):
-            try:
-                raw_text = get_pdf_text(uploaded_file)
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                prompt = f"""
-                Explain the following concept in 'Banglish' (Bengali mixed with English). 
-                Keep the tone extremely helpful like a friendly senior student helping a junior.
-                Concept/Context from book: {raw_text[:20000]}
-                Target Topic: {concept_input}
-                """
-                response = model.generate_content(prompt)
-                st.markdown("### Banglish Synthesis")
-                st.write(response.text)
-            except Exception as e:
-                st.error(f"Error: {e}")
+        prompt = f"Explain the concept of {concept} from the document using 'Banglish' (Bengali + English mix). Make it very simple and easy to understand for a student."
+        result = process_pdf_with_gemini(uploaded_file, prompt)
+        st.markdown("### 🇧🇩 Banglish Synthesis")
+        st.write(result)
 
-# (Default Discovery Pathway and Literature Review sections stay as your placeholders)
+# Fallback for other modules
 else:
-    st.info("Module under orchestration. Please select a functional module from the sidebar.")
+    st.info(f"The {module} module is currently in static/demo mode.")
